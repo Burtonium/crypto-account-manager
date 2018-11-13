@@ -7,47 +7,33 @@
           <label>Symbol:</label>
           <v-select :options="symbols" v-model="symbol"/>
         </div>
-        <div class="form-group">
-          <label>Type:</label>
-          <select class="form-control" v-model="orderType">
-            <option value="limit">Margin Limit</option>
-            <option value="market">Margin Market</option>
-            <option value="stop">Margin Stop</option>
-            <option value="trailing-stop">Margin Trailing-Stop</option>
-            <option value="fill-or-kill">Margin Fill or Kill</option>
-            <option value="exchange limit">Exchange Limit</option>
-            <option value="exchange stop">Exchange Stop</option>
-            <option value="exchange trailing-stop">Exchange Trailing-Stop</option>
-            <option value="exchange fill-or-kill">Exchange Fill or Kill</option>
-          </select>
+        <div class="row">
+          <div class="form-group col-sm-6">
+            <label>Type:</label>
+            <select class="form-control" v-model="orderTypeIndex">
+              <template v-for="(orderType, index) of orderTypes">
+                <option :value="index">{{ orderType.label }}</option>
+              </template>
+            </select>
+          </div>
+          <div class="form-group col-sm-6">
+            <label>Side:</label>
+            <select class="form-control" v-model="side">
+              <option value="buy">Buy</option>
+              <option value="sell">Sell</option>
+            </select>
+          </div>
         </div>
         <div class="row form-group">
           <div class="col-sm-4">
-            <input class="form-control" type="number" v-model="amount" placeholder="Amount %" min="0" max="100">
+            <input class="form-control" type="number" v-model="percent" placeholder="Amount %" min="0" max="100">
           </div>
           <div class="col-sm-4">
             <input class="form-control" type="number" v-model="price" placeholder="Price">
           </div>
-        </div>
-        <div class="row form-group">
-          <div class="col-sm-3">
-            <div class="form-check mt-1">
-              <input class="form-check-input" type="checkbox" v-model="isHidden" id="isHiddenCheck">
-              <label class="form-check-label" for="isHiddenCheck">
-                Is hidden
-              </label>
-            </div>
-          </div>
-          <div class="col-sm-3">
-            <div class="form-check mt-1">
-              <input class="form-check-input" type="checkbox" v-model="isPostOnly" id="isPostOnly">
-              <label class="form-check-label" for="isPostOnly">
-                Post only
-              </label>
-            </div>
-          </div>
-          <div class="col-sm-3 offset-sm-3">
-            <button class="btn btn-primary" @click="calculateAmounts">Submit</button>
+
+          <div class="col-sm-4">
+            <button class="btn btn-primary float-right" @click="calculateAmounts">Submit</button>
           </div>
         </div>
       </form>
@@ -56,19 +42,36 @@
       Fetching balances...
     </div>
     <div v-if="currentState === states.AMOUNTS_CALCULATED">
+      <h2>Order Details</h2>
       <table class="table">
-        <tr v-for="accountAmount in accountAmounts">
-          <td>{{ accountAmount.label }}</td>
-          <td>{{ accountAmount.amount }}</td>
-        </tr>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Amount</th>
+            <th>Order Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="pendingOrder in pendingOrders">
+            <td>{{ pendingOrder.account.label }}</td>
+            <td v-if="!pendingOrder.error">{{ pendingOrder.amount }} {{ market.base }}</td>
+            <td class="text-danger" v-else>{{ pendingOrder.error.message }}</td>
+            <td :class="orderStatusClass(pendingOrder.status)">{{ pendingOrder.status }}</td>
+          </tr>
+        </tbody>
       </table>
+      <button class="btn btn-outline-default" @click="currentState = states.INITIAL">
+        Back
+      </button>
+      <button class="btn btn-primary float-right">Submit</button>
+    </div>
+    <div v-if="currentState === states.ERROR">
+      ERROR
     </div>
   </div>
 </template>
 <script>
 import { mapGetters } from 'vuex';
-import { bitfinex } from 'ccxt';
-const Bitfinex = bitfinex;
 
 const states = {
   INITIAL: 0,
@@ -78,26 +81,34 @@ const states = {
   ERROR: 4,
 };
 
+const orderStatuses = {
+  READY: 'Ready',
+  PROCESSING: 'Processing',
+  SUCCESS: 'Success',
+  ERROR: 'Error',
+  INVALID: 'Invalid Order',
+};
+
 const orderTypes = [{
   label: 'Margin Limit',
   key: 'limit',
-  type: 'margin',
+  type: 'trading',
 }, {
   label: 'Margin Stop',
   key: 'stop',
-  type: 'margin',
+  type: 'trading',
 }, {
   label: 'Margin Market',
   key: 'market',
-  type: 'margin',
+  type: 'trading',
 }, {
   label: 'Margin Trailing-Stop',
   key: 'trailing-stop',
-  type: 'margin',
+  type: 'trading',
 }, {
   label: 'Margin Fill or Kill',
   key: 'fill-or-kill',
-  type: 'margin',
+  type: 'trading',
 }, {
   label: 'Exchange Limit',
   key: 'exchange limit',
@@ -119,15 +130,17 @@ const orderTypes = [{
 export default {
   data() {
     return {
-      symbols: [],
+      side: 'buy',
+      symbols: ['Loading...'],
       currentState: 0,
-      accountAmounts: [],
-      symbol: 'btcusd',
-      orderType: 'limit',
+      pendingOrders: [],
+      symbol: '',
+      market: {},
+      orderTypeIndex: 0,
       isHidden: false,
       isPostOnly: false,
       price: null,
-      amount: null,
+      percent: null,
     };
   },
   computed: {
@@ -137,25 +150,70 @@ export default {
     },
     states: () => states,
     orderTypes: () => orderTypes,
+    orderStatuses: () => orderStatuses,
   },
   methods: {
     async calculateAmounts() {
-      this.accounts.map(async (a) => {
-        const bfx = new Bitfinex({
-          secret: a.apiSecret,
-          enableRateLimit: true,
-          proxy: 'https://cors-anywhere.herokuapp.com/',
-        });
-        await bfx.loadMarkets();
-        const balances = await bfx.fetchBalance();
-        console.log(balances);
-        return 1;
-      });
       this.currentState = states.FETCHING_BALANCES;
+      const orderType = this.orderTypes[this.orderTypeIndex];
+      this.market = this.$bfx.markets[this.symbol];
+      const pendingOrders = [];
+      for (let i = 0; i < this.accounts.length; i++) { /* eslint-disable-line */
+        const account = this.accounts[i];
+        this.$bfx.apiKey = account.apiKey;
+        this.$bfx.secret = account.apiSecret;
+
+        const response = await this.$bfx.fetchBalance() /* eslint-disable-line */
+          .catch((error) => {
+            pendingOrders.push({
+              account,
+              error,
+              status: orderStatuses.ERROR,
+            });
+          });
+
+        if (response && response.info) {
+          const filtered = response.info.filter((i) => {
+            const sameOrderType = i.type === orderType.type;
+            const sameCurrency = i.currency.toUpperCase() === this.market.base;
+            return sameOrderType && sameCurrency;
+          });
+          const pendingOrder = filtered.length === 1 ? {
+            amount: filtered[0].available * (this.percent / 100),
+            account,
+            status: orderStatuses.READY,
+          } : {
+            amount: 0,
+            account,
+            status: orderStatuses.INVALID,
+          };
+          pendingOrders.push(pendingOrder);
+        }
+      }
+      this.pendingOrders = pendingOrders;
+      this.currentState = states.AMOUNTS_CALCULATED;
+    },
+    orderStatusClass(status) {
+      let classes = '';
+      if (status === orderStatuses.SUCCESS || status === orderStatuses.READY) {
+        classes = 'text-success';
+      } else if (status === orderStatuses.PROCESSING) {
+        classes = 'text-warning';
+      } else if (status === orderStatuses.ERROR || status === orderStatuses.INVALID) {
+        classes = 'text-danger';
+      }
+      return classes;
+    },
+    submitOrders() {
+      for (let i = 0; i < this.pendingOrders.length; i++) { /* eslint-disable-line */
+        const pendingOrder = this.pendingOrders[i];
+        console.log(pendingOrder);
+      }
     },
   },
-  mounted() {
-    const bfx = new Bitfinex({ proxy: 'https://cors-anywhere.herokuapp.com/' });
+  async mounted() {
+    await this.$bfx.loadMarkets();
+    this.symbols = this.$bfx.symbols;
   },
 };
 </script>
