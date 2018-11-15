@@ -63,22 +63,54 @@
       <button class="btn btn-outline-default" @click="currentState = states.INITIAL">
         Back
       </button>
-      <button class="btn btn-primary float-right">Submit</button>
+      <button class="btn btn-primary float-right" @click="submitOrders">Submit</button>
+    </div>
+    <div v-if="currentState === states.ORDERS_PROCESSING">
+      Processing orders...
+    </div>
+    <div v-if="currentState === states.COMPLETED">
+      <h2>Completed Orders</h2>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Amount</th>
+            <th>Order Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="completedOrder in completedOrders">
+            <td>{{ completedOrder.account.label }}</td>
+            <td v-if="!completedOrder.error">{{ completedOrder.amount }} {{ market.base }}</td>
+            <td class="text-danger" v-else>{{ completedOrder.error.message }}</td>
+            <td :class="orderStatusClass(completedOrder.status)">{{ completedOrder.status }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <button class="btn btn-outline-default" @click="currentState = states.INITIAL">
+        Back
+      </button>
     </div>
     <div v-if="currentState === states.ERROR">
       ERROR
+
+      <button class="btn btn-outline-default" @click="currentState = states.INITIAL">
+        Back
+      </button>
     </div>
   </div>
 </template>
 <script>
-import { mapGetters } from 'vuex';
+import { mapGetters, mapActions } from 'vuex';
 
 const states = {
   INITIAL: 0,
   FETCHING_BALANCES: 1,
   AMOUNTS_CALCULATED: 2,
   ORDERS_PROCESSING: 3,
-  ERROR: 4,
+  COMPLETED: 4,
+  ERROR: 5,
 };
 
 const orderStatuses = {
@@ -141,6 +173,7 @@ export default {
       isPostOnly: false,
       price: null,
       percent: null,
+      completedOrders: [],
     };
   },
   computed: {
@@ -153,6 +186,7 @@ export default {
     orderStatuses: () => orderStatuses,
   },
   methods: {
+    ...mapActions('Orders', ['addOrder']),
     async calculateAmounts() {
       this.currentState = states.FETCHING_BALANCES;
       const orderType = this.orderTypes[this.orderTypeIndex];
@@ -187,6 +221,10 @@ export default {
             account,
             status: orderStatuses.INVALID,
           };
+
+          if (pendingOrder.amount === 0) {
+            pendingOrder.status = orderStatuses.INVALID;
+          }
           pendingOrders.push(pendingOrder);
         }
       }
@@ -204,11 +242,35 @@ export default {
       }
       return classes;
     },
-    submitOrders() {
-      for (let i = 0; i < this.pendingOrders.length; i++) { /* eslint-disable-line */
-        const pendingOrder = this.pendingOrders[i];
-        console.log(pendingOrder);
+    async submitOrders() {
+      this.currentState = states.ORDERS_PROCESSING;
+      const readyOrders = this.pendingOrders.filter(o => o.status === orderStatuses.READY);
+      const completedOrders = [];
+      for (let i = 0; i < readyOrders.length; i++) { /* eslint-disable-line */
+        const pendingOrder = readyOrders[i];
+        const type = orderTypes[this.orderTypeIndex].key;
+        let order = await this.$bfx.createOrder( /* eslint-disable-line */
+          this.symbol,
+          type,
+          this.side,
+          pendingOrder.amount,
+          this.price,
+          { type },
+        ).catch((error) => {
+          completedOrders.push({ error: error.message, account: pendingOrder.account });
+        });
+        if (order) {
+          order.account = pendingOrder.account;
+          completedOrders.push(order);
+        }
       }
+
+      this.addOrder({
+        completedOrders,
+        timestamp: new Date(),
+      });
+      this.completedOrders = completedOrders;
+      this.currentState = states.COMPLETED;
     },
   },
   async mounted() {

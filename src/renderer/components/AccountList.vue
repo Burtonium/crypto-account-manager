@@ -18,7 +18,6 @@ export default {
   data() {
     return {
       label: '',
-      types: ['bitfinex'],
       selectedAccount: null,
     };
   },

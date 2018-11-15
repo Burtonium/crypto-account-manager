@@ -20,6 +20,16 @@ export default new Router({
       component: require('@/components/pages/AccountsPage').default,
     },
     {
+      path: '/orders',
+      name: 'orders',
+      component: require('@/components/pages/OrdersPage').default,
+    },
+    {
+      path: '/orders/:orderId',
+      name: 'view-order',
+      component: require('@/components/pages/ViewOrderPage').default,
+    },
+    {
       path: '*',
       redirect: '/',
     },
