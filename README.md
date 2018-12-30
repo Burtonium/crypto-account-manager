@@ -1,6 +1,6 @@
 # crypto-account-manager
 
-> Simple cryptocurrency account manager
+> Simple cryptocurrency account manager. I made this to explore electron-vue.
 
 #### Build Setup
 
