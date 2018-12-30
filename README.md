@@ -1,6 +1,6 @@
 # crypto-account-manager
 
-> App whose goal was to simultaneously execute/cancel orders on many bitfinex accounts at once. I made this to explore electron-vue. This is still a work in progress.
+App whose goal was to simultaneously execute/cancel orders on many bitfinex accounts at once. I made this to explore electron-vue. This is still a work in progress.
 
 #### Build Setup
 
